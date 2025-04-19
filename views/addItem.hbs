@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-KK94CHFLLe+nY2dmCWGMq91rCGa5gtU4mk92HdvYe+M/SXH301p5ILy+dN9+nJOZ"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="../public/css/addItem.css">
+    <title>Add New Item</title>
+    <style>
+        .preview-image {
+            max-width: 200px;
+            max-height: 200px;
+            margin-top: 10px;
+            display: none;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .is-invalid {
+            border-color: #dc3545;
+        }
+        .invalid-feedback {
+            color: #dc3545;
+            font-size: 0.875em;
+        }
+        .loading-spinner {
+            display: none;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+            <h2 class="mb-0"><i class="bi bi-plus-circle"></i> Add New Item</h2>
+        </div>
+        <div class="card-body">
+            {{#if message}}
+                <div class="alert alert-{{#if success}}success{{else}}danger{{/if}} alert-dismissible fade show" role="alert">
+                    {{message}}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {{/if}}
+
+            <form id="itemForm" method="post" action="/items/add" enctype="multipart/form-data" novalidate>
+                <!-- Image Upload with Preview -->
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <label class="form-label" for="featureImage">Featured Image</label>
+                            <input class="form-control" id="featureImage" name="featureImage" type="file" accept="image/*" />
+                            <small class="form-text text-muted">Upload a high-quality image (JPEG, PNG, max 5MB)</small>
+                            <img id="imagePreview" class="preview-image" src="#" alt="Preview" />
+                            <div class="invalid-feedback" id="imageFeedback"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Title and Price -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="form-label" for="title">Item Title <span class="text-danger">*</span></label>
+                            <input class="form-control" id="title" name="title" type="text" required />
+                            <div class="invalid-feedback">Please provide a title for your item.</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="form-label" for="price">Price ($) <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <input class="form-control" id="price" name="price" type="number" step="0.01" min="0" required />
+                            </div>
+                            <div class="invalid-feedback">Please enter a valid price.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Description -->
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <div class="form-group">
+                            <label class="form-label" for="body">Description <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="body" name="body" rows="6" required></textarea>
+                            <div class="invalid-feedback">Please provide a description.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category and Publish Options -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="form-label" for="category">Category <span class="text-danger">*</span></label>
+                            <select class="form-select" name="category" id="category" required>
+                                <option value="">-- Select Category --</option>
+                                {{#each categories}}
+                                    <option value="{{id}}" {{#if (eq id ../formData.category)}}selected{{/if}}>{{category}}</option>
+                                {{/each}}
+                            </select>
+                            <div class="invalid-feedback">Please select a category.</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="form-label">Publishing Options</label>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="published" id="published" style="transform: scale(1.5);" {{#if formData.published}}checked{{/if}}>
+                                <label class="form-check-label ms-2" for="published">Publish this item</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                    <a href="/items" class="btn btn-secondary me-md-2">
+                        <i class="bi bi-x-circle"></i> Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">
+                        <i class="bi bi-save"></i> Save Item
+                        <span class="spinner-border spinner-border-sm loading-spinner" role="status" aria-hidden="true"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+  </div>
+
+  <script>
+    // Image preview functionality
+    document.getElementById('featureImage').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        const preview = document.getElementById('imagePreview');
+        const feedback = document.getElementById('imageFeedback');
+        
+        if (file) {
+            // Validate file type and size
+            const validTypes = ['image/jpeg', 'image/png', 'image/gif'];
+            const maxSize = 5 * 1024 * 1024; // 5MB
+            
+            if (!validTypes.includes(file.type)) {
+                feedback.textContent = 'Only JPEG, PNG, or GIF images are allowed.';
+                e.target.classList.add('is-invalid');
+                preview.style.display = 'none';
+                return;
+            }
+            
+            if (file.size > maxSize) {
+                feedback.textContent = 'Image must be less than 5MB.';
+                e.target.classList.add('is-invalid');
+                preview.style.display = 'none';
+                return;
+            }
+            
+            // Display preview
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                preview.src = event.target.result;
+                preview.style.display = 'block';
+                e.target.classList.remove('is-invalid');
+                feedback.textContent = '';
+            }
+            reader.readAsDataURL(file);
+        } else {
+            preview.style.display = 'none';
+        }
+    });
+
+    // Form validation
+    document.getElementById('itemForm').addEventListener('submit', function(e) {
+        const form = e.target;
+        const submitBtn = document.getElementById('submitBtn');
+        const spinner = submitBtn.querySelector('.loading-spinner');
+        
+        if (!form.checkValidity()) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Add Bootstrap's validation classes
+            form.classList.add('was-validated');
+        } else {
+            // Show loading spinner during submission
+            submitBtn.disabled = true;
+            spinner.style.display = 'inline-block';
+        }
+    });
+
+    // Repopulate form data if available
+    document.addEventListener('DOMContentLoaded', function() {
+        const formData = {{{json formData}}};
+        if (formData) {
+            for (const field in formData) {
+                const element = document.querySelector(`[name="${field}"]`);
+                if (element) {
+                    if (element.type === 'checkbox') {
+                        element.checked = formData[field];
+                    } else {
+                        element.value = formData[field];
+                    }
+                }
+            }
+        }
+    });
+  </script>
+</body>
+</html>
