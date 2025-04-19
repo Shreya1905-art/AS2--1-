@@ -4,356 +4,370 @@
 * of this assignment has been copied manually or electronically from any other source
 * (including 3rd party web sites) or distributed to other students.
 *
-* Name: Shreya Patel Student ID: 175918234 Date: 2025-03-05
+* Name:patel shreya A  Student ID:175918234  Date: 4/18/2025
 *
-* Cyclic Web App URL: https://replit.com/@sapatel1905/AS2-1-
+* Cyclic Web App URL: ( https://cloud.mongodb.com/v2/6802a54f8958c0496aa2d12a#/clusters)
 *
-* GitHub Repository URL: https://github.com/Shreya1905-art/AS2--1-
+* GitHub Repository URL:https://github.com/Shreya1905-art/AS2--1- 
 *
 ********************************************************************************/
+
 const express = require('express');
 const path = require('path');
 const storeService = require('./store-service');
+const authData = require('./auth-service');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const streamifier = require('streamifier');
+const exphbs = require('express-handlebars');
+const clientSessions = require('client-sessions');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Configure Cloudinary
+const hbs = exphbs.create({
+  helpers: {
+    navLink: function(url, options) {
+      return '<li' + ((url == app.locals.activeRoute) ? ' class="active"' : '') + '><a href="' + url + '">' + options.fn(this) + '</a></li>';
+    },
+    eq: function(v1, v2) {
+      return v1 === v2;
+    },
+    safeHTML: function(html) {
+      return new hbs.handlebars.SafeString(html);
+    },
+    formatDate: function(dateObj) {
+      let year = dateObj.getFullYear();
+      let month = (dateObj.getMonth() + 1).toString();
+      let day = dateObj.getDate().toString();
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2,'0')}`;
+    },
+    json: function(context) {
+      return JSON.stringify(context);
+    }
+  },
+  extname: '.hbs'
+});
+app.engine('.hbs', hbs.engine);
+app.set('view engine', '.hbs');
+
 cloudinary.config({
-  cloud_name: 'Your_Cloud_Name',
-  api_key: 'Your_API_Key',
-  api_secret: 'Your_API_Secret',
+  cloud_name: 'dye81gsmz',
+  api_key: '656445142472678',
+  api_secret: 'LaXqfDuY1BoxpWx8sLahpfa1XBM',
   secure: true
 });
 
-// Middleware to parse form data
+app.use(clientSessions({
+  cookieName: 'session',
+  secret: 'your_secret_key_here', 
+  duration: 24 * 60 * 60 * 1000, 
+  activeDuration: 1000 * 60 * 5 
+}));
+
 app.use(express.urlencoded({ extended: true }));
-
-// Multer setup for file uploads
-const upload = multer();
-
-// Serve static files from 'public' and 'views' directories
+app.use(express.json());
+const upload = multer({
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 app.use(express.static('public'));
-app.use(express.static('views'));
 
-// Routes
+// Middleware to make session available to templates
+app.use(function(req, res, next) {
+  res.locals.session = req.session;
+  next();
+});
+
+// Middleware to set activeRoute
+app.use(function(req, res, next) {
+  let route = req.path.substring(1);
+  app.locals.activeRoute = '/' + (isNaN(route.split('/')[1]) ? route.replace(/\/(?!.*)/, '') : route.replace(/\/(.*)/, ''));
+  app.locals.viewingCategory = req.query.category;
+  next();
+});
+
+// Authentication middleware to protect routes
+function ensureLogin(req, res, next) {
+  if (!req.session.user) {
+    res.redirect('/login');
+  } else {
+    next();
+  }
+}
+
+// Public routes
 app.get('/', (req, res) => {
-  res.redirect('/about');
+  res.redirect('/shop');
 });
 
 app.get('/about', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'about.html'));
+  res.render('about');
 });
 
 app.get('/shop', async (req, res) => {
   try {
-    const items = await storeService.getPublishedItems();
-    res.json(items);
+    const [publishedItems, categories] = await Promise.all([
+      storeService.getPublishedItems().catch(err => []),
+      storeService.getCategories().catch(err => [])
+    ]);
+
+    res.render('shop', {
+      data: {
+        post: publishedItems[0] || null,
+        posts: publishedItems,
+        categories: categories,
+        viewingCategory: req.query.category,
+        message: publishedItems.length === 0 ? 'No published items found' : null
+      }
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message || 'Error fetching published items' });
+    res.status(500).render('shop', {
+      data: {
+        post: null,
+        posts: [],
+        categories: [],
+        message: 'We encountered an error. Please try again later.'
+      }
+    });
   }
 });
 
-// Updated /items route to support filtering
-app.get('/items', async (req, res) => {
+app.get('/shop/:id', async (req, res) => {
   try {
-    if (req.query.category) {
-      const items = await storeService.getItemsByCategory(req.query.category);
-      return res.json(items);
-    }
-    if (req.query.minDate) {
-      const items = await storeService.getItemsByMinDate(req.query.minDate);
-      return res.json(items);
-    }
-    const items = await storeService.getAllItems();
-    res.json(items);
-  } catch (err) {
-    res.status(500).json({ message: err.message || 'Error fetching items' });
-  }
-});
+    const [item, publishedItems, categories] = await Promise.all([
+      storeService.getItemById(req.params.id),
+      storeService.getPublishedItems().catch(() => []),
+      storeService.getCategories().catch(() => [])
+    ]);
 
-// Fetch a single item by ID
-app.get('/item/:id', async (req, res) => {
-  try {
-    const item = await storeService.getItemById(req.params.id);
     if (!item) {
-      return res.status(404).json({ message: "Item not found" });
+      return res.status(404).render('shop', { 
+        data: {
+          message: 'Item not found'
+        }
+      });
     }
-    res.json(item);
+
+    res.render('shop', {
+      data: {
+        post: item,
+        posts: publishedItems,
+        categories: categories,
+        viewingCategory: req.query.category
+      }
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message || "Error fetching item" });
+    res.status(500).render('shop', { 
+      data: {
+        message: 'Error fetching item: ' + err.message
+      }
+    });
   }
 });
 
-app.get('/categories', async (req, res) => {
+// Authentication routes
+app.get('/login', (req, res) => {
+  res.render('login');
+});
+
+app.get('/register', (req, res) => {
+  res.render('register');
+});
+
+app.post('/register', (req, res) => {
+  authData.registerUser(req.body)
+    .then(() => {
+      res.render('register', { successMessage: "User created" });
+    })
+    .catch((err) => {
+      res.render('register', { 
+        errorMessage: err, 
+        userName: req.body.userName 
+      });
+    });
+});
+
+app.post('/login', (req, res) => {
+  req.body.userAgent = req.get('User-Agent');
+  
+  authData.checkUser(req.body)
+    .then((user) => {
+      req.session.user = {
+        userName: user.userName,
+        email: user.email,
+        loginHistory: user.loginHistory
+      };
+      res.redirect('/items');
+    })
+    .catch((err) => {
+      res.render('login', { 
+        errorMessage: err, 
+        userName: req.body.userName 
+      });
+    });
+});
+
+app.get('/logout', (req, res) => {
+  req.session.reset();
+  res.redirect('/');
+});
+
+app.get('/userHistory', ensureLogin, (req, res) => {
+  res.render('userHistory');
+});
+
+// Protected routes (require login)
+app.get('/items', ensureLogin, async (req, res) => {
+  try {
+    let items = [];
+    if (req.query.category) {
+      items = await storeService.getItemsByCategory(req.query.category).catch(() => []);
+    } else if (req.query.minDate) {
+      items = await storeService.getItemsByMinDate(req.query.minDate).catch(() => []);
+    } else {
+      items = await storeService.getAllItems().catch(() => []);
+    }
+
+    const categories = await storeService.getCategories().catch(() => []);
+
+    res.render('items', {
+      items: items,
+      categories: categories,
+      message: items.length === 0 ? 'No items found' : null,
+      query: req.query
+    });
+  } catch (err) {
+    res.status(500).render('items', {
+      items: [],
+      categories: [],
+      message: 'Error loading items: ' + (err.message || 'Unknown error')
+    });
+  }
+});
+
+app.get('/items/add', ensureLogin, async (req, res) => {
   try {
     const categories = await storeService.getCategories();
-    res.json(categories);
+    res.render('addItem', { 
+      categories: categories,
+      message: categories.length === 0 ? 'No categories available' : null,
+      formData: null
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message || 'Error fetching categories' });
+    res.status(500).render('addItem', { 
+      categories: [],
+      message: 'Error loading categories: ' + err.message,
+      formData: null
+    });
   }
 });
 
-// Route to serve addItem.html
-app.get('/items/add', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'addItem.html'));
-});
-
-// Route to handle form submission and image upload
-app.post('/items/add', upload.single('featureImage'), async (req, res) => {
+app.post('/items/add', ensureLogin, upload.single('featureImage'), async (req, res) => {
   try {
-    let imageUrl = "";
-
+    let imageUrl = null;
     if (req.file) {
-      const streamUpload = (req) => {
-        return new Promise((resolve, reject) => {
-          let stream = cloudinary.uploader.upload_stream((error, result) => {
-            if (result) {
-              resolve(result);
-            } else {
-              reject(error);
-            }
-          });
-          streamifier.createReadStream(req.file.buffer).pipe(stream);
-        });
-      };
-
-      const uploadResult = await streamUpload(req);
-      imageUrl = uploadResult.url;
+      const uploadResult = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { 
+            folder: 'items',
+            allowed_formats: ['jpg', 'jpeg', 'png'],
+            transformation: [{ width: 800, height: 600, crop: 'limit' }]
+          },
+          (error, result) => error ? reject(error) : resolve(result)
+        );
+        streamifier.createReadStream(req.file.buffer).pipe(stream);
+      });
+      imageUrl = uploadResult.secure_url;
     }
 
     const newItem = {
-      name: req.body.itemName,
+      title: req.body.title,
       category: req.body.category,
       price: req.body.price,
-      description: req.body.description,
-      published: req.body.published ? true : false,
+      body: req.body.body,
+      published: req.body.published === 'on',
       featureImage: imageUrl
     };
 
     await storeService.addItem(newItem);
     res.redirect('/items');
   } catch (err) {
-    res.status(500).json({ message: err.message || 'Error adding item' });
+    const categories = await storeService.getCategories().catch(() => []);
+    res.status(400).render('addItem', {
+      categories: categories,
+      message: 'Error: ' + (err.message || 'Failed to add item'),
+      formData: req.body
+    });
   }
 });
 
-// 404 Route - Handles unmatched routes
-app.use((req, res) => {
-  res.status(404).send('Page Not Found');
+app.get('/categories', ensureLogin, async (req, res) => {
+  try {
+    const categories = await storeService.getCategories();
+    res.render('categories', { 
+      categories: categories,
+      message: categories.length === 0 ? 'No categories found' : null
+    });
+  } catch (err) {
+    res.status(500).render('categories', { 
+      message: 'Error fetching categories: ' + err.message
+    });
+  }
 });
 
-// Initialize store service and start server
+app.get('/categories/add', ensureLogin, (req, res) => {
+  res.render('addCategory');
+});
+
+app.post('/categories/add', ensureLogin, async (req, res) => {
+  try {
+    await storeService.addCategory(req.body);
+    res.redirect('/categories');
+  } catch (err) {
+    res.status(500).render('addCategory', { 
+      message: 'Unable to create category: ' + err.message
+    });
+  }
+});
+
+app.get('/categories/delete/:id', ensureLogin, async (req, res) => {
+  try {
+    await storeService.deleteCategoryById(req.params.id);
+    res.redirect('/categories');
+  } catch (err) {
+    res.status(500).render('categories', {
+      message: 'Unable to remove category: ' + err.message
+    });
+  }
+});
+
+app.get('/items/delete/:id', ensureLogin, async (req, res) => {
+  try {
+    await storeService.deletePostById(req.params.id);
+    res.redirect('/items');
+  } catch (err) {
+    res.status(500).render('items', {
+      message: 'Unable to remove item: ' + err.message
+    });
+  }
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).render('404');
+});
+
+// Initialize and start server
 storeService.initialize()
+  .then(authData.initialize)
   .then(() => {
     app.listen(PORT, () => {
       console.log(`✅ Server running on port ${PORT}`);
     });
   })
   .catch((err) => {
-    console.error(`❌ Failed to initialize store service: ${err}`);
+    console.error(`❌ Failed to initialize services: ${err}`);
+    process.exit(1);
   });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  
-
-
-  /*cloud name - dye81gsmz
-API Key - 656445142472678
-API Secret - LaXqfDuY1BoxpWx8sLahpfa1XBM */
